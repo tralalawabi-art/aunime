@@ -134,8 +134,12 @@ async function request(method: string, url: string, data: any = null, headers: a
         }
       }
       const res = await axios(config);
+      if (process.env.NODE_ENV === 'development' || process.env.DEBUG_SCRAPER === 'true') {
+        console.log(`[Scraper] ${method} ${url} -> ${res.status}`);
+      }
       return res;
-    } catch (e) {
+    } catch (e: any) {
+      console.error(`[Scraper Error] ${method} ${url}:`, e.message);
       if (i < retries - 1) await randomDelay(1500, 4000);
       else throw e;
     }
@@ -151,7 +155,22 @@ export class OtakudesuScraper {
     const headers = getHeaders(url, this.cookieJar.getString());
     const res = await request('GET', url, null, headers, retries);
     this.cookieJar.update(res.headers);
-    return res.data;
+    
+    let html = res.data;
+    if (typeof html !== 'string') {
+      // Handle common proxy JSON response wrappers
+      if (html && typeof html === 'object') {
+        html = html.contents || html.content || html.data || html.html || JSON.stringify(html);
+      } else {
+        html = String(html);
+      }
+    }
+
+    if (html.includes('cf-browser-verification') || html.includes('Cloudflare')) {
+      console.warn(`[Scraper Warning] Cloudflare detected at ${url}`);
+    }
+
+    return html;
   }
 
   private async _postAjax(payload: any, retries = 5): Promise<any> {
@@ -217,15 +236,16 @@ export class OtakudesuScraper {
 
   private _parseCardDetpost($: cheerio.CheerioAPI, element: any) {
     const $el = $(element);
-    const link = $el.find('.thumb a').attr('href');
-    const title = $el.find('.jdlflm').text().trim();
-    const poster = $el.find('.thumbz img').attr('src') || null;
-    const episode = $el.find('.epz').text().trim() || null;
+    const link = $el.find('.thumb a').attr('href') || $el.find('a').first().attr('href');
+    const title = $el.find('.jdlflm').text().trim() || $el.find('h2').text().trim() || $el.find('.thumb a').attr('title')?.trim();
+    const poster = $el.find('.thumbz img').attr('src') || $el.find('img').first().attr('src') || null;
+    const episode = $el.find('.epz').text().trim() || $el.find('.epztipe').text().trim() || null;
     const day = $el.find('.epztipe').text().trim() || null;
     const date = $el.find('.newnime').text().trim() || null;
+    
     if (!link || !title) return null;
 
-    const fullUrl = link.startsWith('http') ? link : this.base + link;
+    const fullUrl = link.startsWith('http') ? link : this.base + (link.startsWith('/') ? link : '/' + link);
     const slug = getSlugFromUrl(fullUrl);
     const type = getTypeFromUrl(fullUrl);
 
@@ -455,10 +475,28 @@ export class OtakudesuScraper {
     const html = await this._fetchHTML(url);
     const $ = cheerio.load(html);
     const items: any[] = [];
-    $('.detpost:has(.epz:contains("Episode"))').each((i, el) => {
-      const card = this._parseCardDetpost($, el);
-      if (card) items.push(card);
-    });
+    
+    // Try multiple selectors for better resilience
+    const selectors = [
+      '.detpost:has(.epz)', 
+      '.detpost', 
+      '.venutama .vezone .vpost'
+    ];
+    
+    for (const selector of selectors) {
+      $(selector).each((i, el) => {
+        const card = this._parseCardDetpost($, el);
+        if (card && !items.find(item => item.slug === card.slug)) {
+          items.push(card);
+        }
+      });
+      if (items.length > 0) break;
+    }
+
+    if (items.length === 0) {
+      console.warn(`[Scraper Warning] No items found on home page using selectors. HTML length: ${html.length}`);
+    }
+
     return this._buildResponse('home', url, { items });
   }
 
@@ -467,10 +505,18 @@ export class OtakudesuScraper {
     const html = await this._fetchHTML(url);
     const $ = cheerio.load(html);
     const items: any[] = [];
-    $('.detpost').each((i, el) => {
-      const card = this._parseCardDetpost($, el);
-      if (card) items.push(card);
-    });
+    
+    const selectors = ['.detpost', '.venutama .vezone .vpost', '.col-anime-con'];
+    for (const selector of selectors) {
+      $(selector).each((i, el) => {
+        const card = this._parseCardDetpost($, el);
+        if (card && !items.find(item => item.slug === card.slug)) {
+          items.push(card);
+        }
+      });
+      if (items.length > 0) break;
+    }
+
     const pagination = this._parsePagination($);
     return this._buildResponse('ongoing', url, { pagination, items });
   }
@@ -480,10 +526,18 @@ export class OtakudesuScraper {
     const html = await this._fetchHTML(url);
     const $ = cheerio.load(html);
     const items: any[] = [];
-    $('.detpost').each((i, el) => {
-      const card = this._parseCardDetpost($, el);
-      if (card) items.push(card);
-    });
+    
+    const selectors = ['.detpost', '.venutama .vezone .vpost', '.col-anime-con'];
+    for (const selector of selectors) {
+      $(selector).each((i, el) => {
+        const card = this._parseCardDetpost($, el);
+        if (card && !items.find(item => item.slug === card.slug)) {
+          items.push(card);
+        }
+      });
+      if (items.length > 0) break;
+    }
+
     const pagination = this._parsePagination($);
     return this._buildResponse('complete', url, { pagination, items });
   }
