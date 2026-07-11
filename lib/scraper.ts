@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 
-const BASE_URL = 'https://otakudesu.blog';
+const BASE_URL = process.env.OTAKUDESU_URL || 'https://otakudesu.blog';
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -100,9 +100,13 @@ async function request(method: string, url: string, data: any = null, headers: a
   for (let i = 0; i < retries; i++) {
     try {
       await randomDelay(300, 800);
+      let finalUrl = url;
+      if (process.env.SCRAPER_PROXY_PREFIX) {
+        finalUrl = process.env.SCRAPER_PROXY_PREFIX + encodeURIComponent(url);
+      }
       const config: any = {
         method,
-        url,
+        url: finalUrl,
         headers,
         timeout: 30000,
         httpsAgent: new https.Agent({ rejectUnauthorized: false, keepAlive: true }),
@@ -112,6 +116,22 @@ async function request(method: string, url: string, data: any = null, headers: a
       };
       if (data && (method === 'POST' || method === 'PUT')) {
         config.data = data;
+      }
+      if (process.env.SCRAPER_PROXY) {
+        try {
+          const proxyUrl = new URL(process.env.SCRAPER_PROXY);
+          config.proxy = {
+            protocol: proxyUrl.protocol.replace(':', ''),
+            host: proxyUrl.hostname,
+            port: parseInt(proxyUrl.port, 10),
+            auth: proxyUrl.username ? {
+              username: decodeURIComponent(proxyUrl.username),
+              password: decodeURIComponent(proxyUrl.password)
+            } : undefined
+          };
+        } catch (err) {
+          console.error('Invalid SCRAPER_PROXY environment variable:', err);
+        }
       }
       const res = await axios(config);
       return res;
