@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Creare",
+  "description": "A powerful creative studio for designing, building, and sharing your most innovative ideas with the world.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
